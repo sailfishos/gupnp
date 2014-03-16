@@ -13,7 +13,7 @@ BuildRequires: gnome-common
 BuildRequires: libsoup-devel
 BuildRequires: libxml2-devel
 BuildRequires: libuuid-devel
-
+BuildRequires: pkgconfig(connman)
 Requires: dbus
 
 %description
