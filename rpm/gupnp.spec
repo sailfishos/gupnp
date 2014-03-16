@@ -9,7 +9,10 @@ URL:           http://www.gupnp.org/
 Source0:       http://download.gnome.org/sources/%{name}/0.20/%{name}-%{version}.tar.xz
 
 BuildRequires: gssdp-devel >= 0.14.0
+BuildRequires: gobject-introspection-devel >= 1.36
 BuildRequires: gnome-common
+BuildRequires: vala-devel
+BuildRequires: vala-tools
 BuildRequires: libsoup-devel
 BuildRequires: libxml2-devel
 BuildRequires: libuuid-devel
@@ -56,8 +59,12 @@ find %{buildroot} -name '*.la' -exec rm -f {} ';'
 %doc AUTHORS COPYING README
 %{_libdir}/libgupnp-1.0.so.*
 %{_bindir}/gupnp-binding-tool
+%{_libdir}/girepository-1.0/GUPnP-1.0.typelib
 
 %files devel
 %{_libdir}/pkgconfig/gupnp-1.0.pc
 %{_libdir}/libgupnp-1.0.so
 %{_includedir}/gupnp-1.0
+%{_datadir}/gir-1.0/GUPnP-1.0.gir
+%{_datadir}/vala/vapi/gupnp-1.0.deps
+%{_datadir}/vala/vapi/gupnp-1.0.vapi
