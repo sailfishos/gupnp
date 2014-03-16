@@ -153,7 +153,7 @@ AS_IF([test "x$VAPIGEN" != "x"], [have_vapigen=yes])
 AM_CONDITIONAL([HAVE_VAPIGEN], [test "x$VAPIGEN" != "x"])
 
 # Gtk-doc
-GTK_DOC_CHECK([1.14],[--flavour no-tmpl])
+dnl GTK_DOC_CHECK([1.14],[--flavour no-tmpl])
 
 AC_CONFIG_FILES([
 Makefile
@@ -162,8 +162,6 @@ examples/Makefile
 tools/Makefile
 tests/Makefile
 tests/gtest/Makefile
-doc/Makefile
-doc/version.xml
 vala/Makefile
 gupnp-1.0.pc
 gupnp-1.0-uninstalled.pc
