@@ -1,6 +1,6 @@
 AC_PREREQ([2.64])
 AC_INIT([gupnp],
-        [0.20.10],
+        [0.20.13],
         [http://bugzilla.gnome.org/enter_bug.cgi?product=gupnp&component=gupnp],
         [gupnp],
         [http://www.gupnp.org/])
@@ -34,25 +34,26 @@ case "$target_os" in
      mingw*|cygwin*)
         os_win32=yes
         AC_MSG_RESULT(Win32)
-        UUID=
+        UUID_LIBS=
         ;;
      darwin*)
         AC_MSG_RESULT(Darwin)
-        UUID=
+        UUID_LIBS=
         ;;
      *)
         AC_MSG_RESULT($target_os)
-        UUID=uuid
+        UUID_LIBS=uuid
         ;;
 esac
+AC_SUBST([UUID_LIBS])
 
-PKG_CHECK_MODULES(LIBGUPNP, glib-2.0 >= 2.24.0 \
+PKG_CHECK_MODULES(LIBGUPNP, glib-2.0 >= 2.28.0 \
                             gio-2.0 \
                             gmodule-2.0 \
                             gssdp-1.0 >= 0.13.0 \
                             libsoup-2.4 >= 2.28.2 \
                             libxml-2.0 \
-                            $UUID)
+                            $UUID_LIBS)
 PKG_CHECK_MODULES(GTHREAD, gthread-2.0)
 
 AM_CONDITIONAL(OS_WIN32, test "x$os_win32" = "xyes")
@@ -88,6 +89,12 @@ AC_CHECK_HEADERS([sys/socket.h linux/rtnetlink.h],
 AM_CONDITIONAL([HAVE_NETLINK], [test "x$HAVE_NETLINK" = "xyes"])
 AC_SUBST(HAVE_NETLINK)
 
+AC_CHECK_HEADERS([ifaddrs.h],
+                 [ HAVE_IFADDRS_H=yes ],
+                 [ HAVE_IFADDRS_H=no ])
+AM_CONDITIONAL([HAVE_IFADDRS_H], [test "x$HAVE_IFADDRS_H" = "xyes"])
+AC_SUBST(HAVE_IFADDRS_H)
+
 AC_CHECK_HEADERS([linux/wireless.h], [], [],
                 [ #ifdef HAVE_SYS_SOCKET_H
                   #include <sys/socket.h>
@@ -99,20 +106,16 @@ AC_MSG_RESULT([${with_context_manager}])
 
 AM_CONDITIONAL([USE_NETWORK_MANAGER],
                [test "x$with_context_manager" = "xnetwork-manager"])
-AS_IF([test "x$with_context_manager" = "xnetwork-manager"],
-      [PKG_CHECK_MODULES(GIO, gio-2.0 >= 2.26)])
 
 AM_CONDITIONAL([USE_CONNMAN],
                [test "x$with_context_manager" = "xconnman"])
 
-if test "x$with_context_manager" = "xconnman"; then
-        PKG_CHECK_MODULES(CONNMAN, glib-2.0 >= 2.28 connman >= 0.80)
-fi
-
 USE_NETLINK=no
 AS_IF([test "x$with_context_manager" = "xlinux"],
       [AS_IF([test "x$HAVE_NETLINK" = "xno"],
-             [AC_MSG_NOTICE([No rtnetlink found, falling back to static context manager])],
+             [AS_IF([test "x$HAVE_IFADDRS" = "xyes"],
+	     AC_MSG_NOTICE([No rtnetlink found, falling back to static context manager]),
+	     AC_MSG_ERROR([No rtnetlink nor ifaddrs.h found]))],
              [USE_NETLINK=yes])
       ],[])
 
@@ -128,7 +131,7 @@ AC_ARG_ENABLE(debug,
         AS_HELP_STRING([--enable-debug], [enable debugging]),,
         enable_debug=no)
 if test "x$enable_debug" = "xyes"; then
-        CFLAGS="$CFLAGS -g -Wall -Werror"
+        CFLAGS="$CFLAGS -g -Wall -Wextra -Werror"
 fi
 
 GOBJECT_INTROSPECTION_CHECK([0.6.4])

@@ -95,10 +95,8 @@ gupnp_service_state_variable_info_free
                 g_value_unset (&variable->maximum);
                 g_value_unset (&variable->step);
         }
-        g_list_foreach (variable->allowed_values,
-                         (GFunc) g_free,
-                         NULL);
-        g_list_free (variable->allowed_values);
+
+        g_list_free_full (variable->allowed_values, g_free);
 
         g_slice_free (GUPnPServiceStateVariableInfo, variable);
 }
@@ -164,12 +162,8 @@ gupnp_service_action_info_free (GUPnPServiceActionInfo *action_info)
         GList *iter;
 
         g_free (action_info->name);
-
-        for (iter = action_info->arguments; iter; iter = iter->next) {
-                gupnp_service_action_arg_info_free (
-                                (GUPnPServiceActionArgInfo *) iter->data);
-        }
-        g_list_free (action_info->arguments);
+        g_list_free_full (action_info->arguments,
+                          (GDestroyNotify) gupnp_service_action_arg_info_free);
         g_slice_free (GUPnPServiceActionInfo, action_info);
 }
 
@@ -180,23 +174,19 @@ gupnp_service_introspection_finalize (GObject *object)
 
         introspection = GUPNP_SERVICE_INTROSPECTION (object);
 
-        if (introspection->priv->variables) {
-                g_list_foreach (introspection->priv->variables,
-                                (GFunc) gupnp_service_state_variable_info_free,
-                                NULL);
-                g_list_free (introspection->priv->variables);
-        }
+        g_list_free_full (introspection->priv->variables,
+                          (GDestroyNotify) gupnp_service_state_variable_info_free);
 
-        if (introspection->priv->actions) {
-                g_list_foreach (introspection->priv->actions,
-                                (GFunc) gupnp_service_action_info_free,
-                                NULL);
-                g_list_free (introspection->priv->actions);
-        }
+        g_list_free_full (introspection->priv->actions,
+                          (GDestroyNotify) gupnp_service_action_info_free);
 
+        /* Contents don't need to be freed, they were owned by priv->variables
+         */
         if (introspection->priv->variable_names)
                 g_list_free (introspection->priv->variable_names);
 
+        /* Contents don't need to be freed, they were owned by priv->actions
+         */
         if (introspection->priv->action_names)
                 g_list_free (introspection->priv->action_names);
 }
@@ -605,7 +595,6 @@ get_actions (xmlNode *list_element)
              action_node;
              action_node = action_node->next) {
                 GUPnPServiceActionInfo *action_info;
-                GList *arguments;
                 char *name;
 
                 if (strcmp ("action", (char *) action_node->name) != 0)
@@ -616,16 +605,9 @@ get_actions (xmlNode *list_element)
                 if (!name)
                         continue;
 
-                arguments = get_action_arguments (action_node);
-                if (!arguments) {
-                        g_free (name);
-
-                        continue;
-                }
-
                 action_info = g_slice_new0 (GUPnPServiceActionInfo);
                 action_info->name = name;
-                action_info->arguments = arguments;
+                action_info->arguments = get_action_arguments (action_node);
 
                 actions = g_list_append (actions, action_info);
         }
