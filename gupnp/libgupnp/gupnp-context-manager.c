@@ -25,12 +25,13 @@
 
 /**
  * SECTION:gupnp-context-manager
- * @short_description: Manages #GUPnPContext objects.
+ * @short_description: Manages GUPnPContext objects.
  *
  * A Utility class that takes care of creation and destruction of
  * #GUPnPContext objects for all available network interfaces as they go up
  * (connect) and down (disconnect), respectively.
  *
+ * Since: 0.13.0
  */
 
 #include <config.h>
@@ -45,7 +46,9 @@
 #include "gupnp.h"
 #include "gupnp-marshal.h"
 
+#ifdef HAVE_IFADDRS_H
 #include "gupnp-unix-context-manager.h"
+#endif
 
 #ifdef G_OS_WIN32
 #include "gupnp-windows-context-manager.h"
@@ -506,6 +509,7 @@ gupnp_context_manager_class_init (GUPnPContextManagerClass *klass)
  * Same as gupnp_context_manager_create().
  *
  * Returns: (transfer full): A new #GUPnPContextManager object.
+ * Since: 0.13.0
  * Deprecated: 0.17.2: Use gupnp_context_manager_create().
  **/
 GUPnPContextManager *
@@ -534,6 +538,8 @@ gupnp_context_manager_new (GMainContext *main_context,
  * the implementation falls back to the basic Unix context manager instead.
  *
  * Returns: (transfer full): A new #GUPnPContextManager object.
+ *
+ * Since: 0.17.2
  **/
 GUPnPContextManager *
 gupnp_context_manager_create (guint port)
@@ -550,12 +556,12 @@ gupnp_context_manager_create (guint port)
 #if defined(USE_NETWORK_MANAGER)
         system_bus = g_bus_get_sync (G_BUS_TYPE_SYSTEM, NULL, NULL);
 
-        if (gupnp_network_manager_is_available ())
+        if (system_bus != NULL && gupnp_network_manager_is_available ())
                 impl_type = GUPNP_TYPE_NETWORK_MANAGER;
 #elif defined(USE_CONNMAN)
         system_bus = g_bus_get_sync (G_BUS_TYPE_SYSTEM, NULL, NULL);
 
-       if (gupnp_connman_manager_is_available ())
+       if (system_bus != NULL && gupnp_connman_manager_is_available ())
                 impl_type = GUPNP_TYPE_CONNMAN_MANAGER;
 #endif
 
@@ -564,21 +570,28 @@ gupnp_context_manager_create (guint port)
              * are using one of the DBus managers but it's not available, so we
              * fall-back to it. */
 #if defined (USE_NETLINK) || defined (HAVE_LINUX_RTNETLINK_H)
+#if defined (HAVE_IFADDRS_H)
                 if (gupnp_linux_context_manager_is_available ())
                         impl_type = GUPNP_TYPE_LINUX_CONTEXT_MANAGER;
                 else
                     impl_type = GUPNP_TYPE_UNIX_CONTEXT_MANAGER;
 #else
+		impl_type = GUPNP_TYPE_LINUX_CONTEXT_MANAGER;
+
+#endif
+#elif defined (HAVE_IFADDRS_H)
                 impl_type = GUPNP_TYPE_UNIX_CONTEXT_MANAGER;
+#else
+#error No context manager defined
 #endif
         }
 #endif /* G_OS_WIN32 */
-        impl = g_object_new (impl_type,
-                             "port", port,
-                             NULL);
+        impl = GUPNP_CONTEXT_MANAGER (g_object_new (impl_type,
+                                                    "port", port,
+                                                    NULL));
 
 #if defined(USE_NETWORK_MANAGER) || defined(USE_CONNMAN)
-        g_object_unref (system_bus);
+        g_clear_object (&system_bus);
 #endif
         return impl;
 }
@@ -591,6 +604,8 @@ gupnp_context_manager_create (guint port)
  * Only the active control points send discovery messages.
  * This function should be called when servers are suspected to have
  * disappeared.
+ *
+ * Since: 0.20.3
  **/
 void
 gupnp_context_manager_rescan_control_points (GUPnPContextManager *manager)
@@ -622,6 +637,8 @@ gupnp_context_manager_rescan_control_points (GUPnPContextManager *manager)
  * You usually want to call this function from
  * #GUPnPContextManager::context-available handler after you create a
  * #GUPnPControlPoint object for the newly available context.
+ *
+ * Since: 0.13.0
  **/
 void
 gupnp_context_manager_manage_control_point (GUPnPContextManager *manager,
@@ -644,6 +661,8 @@ gupnp_context_manager_manage_control_point (GUPnPContextManager *manager,
  * usually want to call this function from
  * #GUPnPContextManager::context-available handler after you create a
  * #GUPnPRootDevice object for the newly available context.
+ *
+ * Since: 0.13.0
  **/
 void
 gupnp_context_manager_manage_root_device (GUPnPContextManager *manager,
@@ -662,6 +681,8 @@ gupnp_context_manager_manage_root_device (GUPnPContextManager *manager,
  *
  * Get the network port associated with this context manager.
  * Returns: The network port asssociated with this context manager.
+ *
+ * Since: 0.19.1
  */
 guint
 gupnp_context_manager_get_port (GUPnPContextManager *manager)
