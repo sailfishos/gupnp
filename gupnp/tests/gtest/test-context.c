@@ -149,7 +149,7 @@ test_gupnp_context_http_ranged_requests (void)
         uri = g_strdup_printf ("http://127.0.0.1:%u/random4k.bin", port);
         g_assert (uri != NULL);
 
-        session = soup_session_async_new ();
+        session = soup_session_new ();
 
         /* Corner cases: First byte */
         request_range_and_compare (file, session, loop, uri, 0, 0);
@@ -207,9 +207,6 @@ test_gupnp_context_http_ranged_requests (void)
 }
 
 int main (int argc, char *argv[]) {
-#if !GLIB_CHECK_VERSION(2,35,0)
-        g_type_init ();
-#endif
         g_test_init (&argc, &argv, NULL);
         g_test_add_func ("/context/http/ranged-requests",
                          test_gupnp_context_http_ranged_requests);

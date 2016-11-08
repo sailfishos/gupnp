@@ -1,6 +1,6 @@
 AC_PREREQ([2.64])
 AC_INIT([gupnp],
-        [0.20.13],
+        [1.0.1],
         [http://bugzilla.gnome.org/enter_bug.cgi?product=gupnp&component=gupnp],
         [gupnp],
         [http://www.gupnp.org/])
@@ -18,15 +18,25 @@ AM_MAINTAINER_MODE([enable])
 
 AM_SILENT_RULES([yes])
 
+AX_REQUIRE_DEFINED([GTK_DOC_CHECK])
+AX_REQUIRE_DEFINED([GOBJECT_INTROSPECTION_CHECK])
+AX_CHECK_ENABLE_DEBUG([yes])
+
 # Check for programs
 AC_PROG_CC
 AC_FUNC_MMAP
 AC_SYS_LARGEFILE
 
+AX_IS_RELEASE([git-directory])
+AX_COMPILER_FLAGS([WARN_CFLAGS])
+
 # Initialize libtool
 LT_PREREQ([2.2])
 LT_INIT
 
+GUUL_CHECK_UUID([internal])
+UUID_LIBS=$GUUL_PKG
+AC_SUBST([UUID_LIBS])
 
 AC_MSG_CHECKING([operating system])
 os_win32=no
@@ -34,26 +44,21 @@ case "$target_os" in
      mingw*|cygwin*)
         os_win32=yes
         AC_MSG_RESULT(Win32)
-        UUID_LIBS=
         ;;
      darwin*)
         AC_MSG_RESULT(Darwin)
-        UUID_LIBS=
         ;;
      *)
         AC_MSG_RESULT($target_os)
-        UUID_LIBS=uuid
         ;;
 esac
-AC_SUBST([UUID_LIBS])
 
-PKG_CHECK_MODULES(LIBGUPNP, glib-2.0 >= 2.28.0 \
+PKG_CHECK_MODULES(LIBGUPNP, glib-2.0 >= 2.40.0 \
                             gio-2.0 \
                             gmodule-2.0 \
-                            gssdp-1.0 >= 0.13.0 \
-                            libsoup-2.4 >= 2.28.2 \
-                            libxml-2.0 \
-                            $UUID_LIBS)
+                            gssdp-1.0 >= 0.14.15 \
+                            libsoup-2.4 >= 2.48.0 \
+                            libxml-2.0)
 PKG_CHECK_MODULES(GTHREAD, gthread-2.0)
 
 AM_CONDITIONAL(OS_WIN32, test "x$os_win32" = "xyes")
@@ -64,7 +69,6 @@ if test "x$os_win32" = "xno"; then
                         [Context Manager backend to use]),,
             [with_context_manager="none"])
 else
-    LIBGUPNP_LIBS="$LIBGUPNP_LIBS -lrpcrt4"
     with_context_manager="windows"
 fi
 
@@ -126,14 +130,6 @@ AC_SUBST(USE_NETLINK)
 GLIB_GENMARSHAL=`pkg-config --variable=glib_genmarshal glib-2.0`
 AC_SUBST(GLIB_GENMARSHAL)
 
-# Debugging
-AC_ARG_ENABLE(debug,
-        AS_HELP_STRING([--enable-debug], [enable debugging]),,
-        enable_debug=no)
-if test "x$enable_debug" = "xyes"; then
-        CFLAGS="$CFLAGS -g -Wall -Wextra -Werror"
-fi
-
 GOBJECT_INTROSPECTION_CHECK([0.6.4])
 
 # vapigen
@@ -179,4 +175,5 @@ echo "
     GObject-Introspection: ${found_introspection}
     VALA bindings:         ${have_vapigen}
     Context manager:       ${with_context_manager}
+    UUID Library:          ${GUUL_FLAVOR}
 "

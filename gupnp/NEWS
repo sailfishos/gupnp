@@ -1,3 +1,168 @@
+1.0.1
+=====
+
+- Connman CM: Various fixes
+- Linux CM: Fix compiler warning about negative shift
+- Documentation: Fix FSF address
+- Documentation: Fix references
+- Build: Update ax_append_link_flags
+
+Bugs fixed in this release:
+ - https://bugzilla.gnome.org/show_bug.cgi?id=770318
+
+All contributors to this release:
+ - Sven Neumann <neumann@teufel.de>
+ - Jens Georg <mail@jensge.org>
+ - Oliver Tappe <zooey@hirschkaefer.de>
+
+1.0.0
+=====
+
+- Only version changed
+
+0.99.0
+======
+- Fix build on OS X
+
+All contributors to this release:
+ - Tomasz Pajor <tomek@polishgeeks.com>
+ - Jens Georg <mail@jensge.org>
+
+0.20.18
+=======
+
+- Retry description URL on failure.
+
+Bugs fixed in this release:
+ - https://bugzilla.gnome.org/show_bug.cgi?id=694450
+
+All contributors to this release:
+ - Jens Georg <mail@jensge.org>
+ - Jozef Šiška <jozef.siska@streamunlimited.com>
+
+0.20.17
+=======
+
+- Update autogen.sh from GNOME template
+- Cache user agents by IP
+- Remove intltool
+- Use newTargetValue in light example
+
+Bugs fixed in this release:
+ - https://bugzilla.gnome.org/show_bug.cgi?id=653894
+ - https://bugzilla.gnome.org/show_bug.cgi?id=763945
+ - https://bugzilla.gnome.org/show_bug.cgi?id=764050
+
+All contributors to this release:
+ - Jens Georg <mail@jensge.org>
+ - Philip Withnall <philip@tecnocode.co.uk>
+
+0.20.16
+=======
+
+- Don't hardcode python path in gupnp-binding-tool
+- Check for IFA_FLAGS to not bind ourselves to a recent kernel version
+- Add missing m4 files
+- Fix issues with introspection
+- Make GUPnPServiceAction boxed
+- Some JavaScript examples
+- Distribute VAPI file in tarball
+
+Bugs fixed in this release:
+ - https://bugzilla.gnome.org/show_bug.cgi?id=760217
+ - https://bugzilla.gnome.org/show_bug.cgi?id=760430
+ - https://bugzilla.gnome.org/show_bug.cgi?id=761265
+
+All contributors to this release:
+ - Jens Georg <mail@jensge.org>
+ - Ting-Wei Lan <lantw@src.gnome.org>
+
+0.20.15
+=======
+
+- Remove gnome-common
+- Fix issue with gupnp_service_signals_autoconnect() blocking endlessly.
+- Fix return type for BIN_HEX.
+- Update some m4 macros.
+- Fix typos in API docs.
+
+NetworkManager context manager:
+ - Fix use-after-free issue.
+ - Fix various static code analysis findings.
+
+Netlink context manager:
+ - Use proper macros for RTM_*ADDRESS messages.
+ - Use device name from netlink.
+ - Add possibility to dump received netlink packets for debugging.
+ - Fix issues with losing contexts after DHCP renew happens.
+ - Some style fixes.
+
+Added/updated dependencies:
+ - GSSDP >= 0.14.13
+
+Bugs fixed in this release:
+ - https://bugzilla.gnome.org/show_bug.cgi?id=736365
+ - https://bugzilla.gnome.org/show_bug.cgi?id=741257
+ - https://bugzilla.gnome.org/show_bug.cgi?id=750936
+ - https://bugzilla.gnome.org/show_bug.cgi?id=752490
+ - https://bugzilla.gnome.org/show_bug.cgi?id=759000
+
+All contributors to this release:
+ - Jens Georg <mail@jensge.org>
+ - Debarshi Ray <debarshir@gnome.org>
+ - Olivier Crête <olivier.crete@collabora.com>
+ - Guillaume Marquebielle <guillaume.marquebielle@parrot.com>
+ - Bastien Nocera <hadess@hadess.net>
+
+0.20.14
+=======
+
+Changes since 0.20.13:
+
+Added/updated dependencies:
+ GLib 2.0 >= 2.40.0
+
+- Simplify UUID handling.
+
+Bugs fixed in this release:
+ - https://bugzilla.gnome.org/show_bug.cgi?id=743072
+ - https://bugzilla.gnome.org/show_bug.cgi?id=744221
+
+All contributors to this release:
+ - Jens Georg <mail@jensge.org>
+
+0.20.13
+=======
+
+Changes since 0.20.12:
+
+- Fix cyclic includes.
+- Avoid redefinition of symbols.
+- Fix missing function declaration.
+- Don't check von connman.pc.
+- Allow actions without arguments.
+- Respect "prefer_bigger" even if there is no icon size.
+- DOAP fixes.
+- Fix VAPI generation.
+- Fix reference counting.
+- Port to new libsoup API.
+
+Bugs fixed in this release:
+ - https://bugzilla.gnome.org/show_bug.cgi?id=722696
+ - https://bugzilla.gnome.org/show_bug.cgi?id=731209
+ - https://bugzilla.gnome.org/show_bug.cgi?id=731457
+ - https://bugzilla.gnome.org/show_bug.cgi?id=733241
+ - https://bugzilla.gnome.org/show_bug.cgi?id=740267
+ - https://bugzilla.gnome.org/show_bug.cgi?id=742075
+
+All contributors to this release:
+ - Jens Georg <mail@jensge.org>
+ - Sven Neumann <neumann@teufel.de>
+ - Jussi Kukkonen <jku@goto.fi>
+ - Olav Vitters <olav@vitters.nl>
+ - Etienne Peron <etienne.peron@parrot.com>
+ - Andre Klapper <a9016009@gmx.de>
+
 0.20.12
 =======
 
