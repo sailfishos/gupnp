@@ -551,12 +551,16 @@ gupnp_service_info_get_event_subscription_url (GUPnPServiceInfo *info)
  * if the service does not provide an SCPD.
  *
  * Warning: You  should use gupnp_service_info_get_introspection_async()
- * instead, this function re-enter the GMainloop before returning.
+ * instead, this function re-enter the GMainloop before returning or might
+ * even block.
  *
  * Return value: (transfer full):  A new #GUPnPServiceIntrospection for this
  * service or %NULL. Unref after use.
+ *
+ * Deprecated: 0.20.15. Use gupnp_service_info_get_introspection_async() or
+ * gupnp_service_info_get_introspection_async_full() instead.
  **/
-GUPnPServiceIntrospection *
+G_DEPRECATED GUPnPServiceIntrospection *
 gupnp_service_info_get_introspection (GUPnPServiceInfo *info,
                                       GError          **error)
 {
@@ -747,7 +751,7 @@ gupnp_service_info_get_introspection_async
  * If @cancellable is used to cancel the call, @callback will be called with
  * error code %G_IO_ERROR_CANCELLED.
  *
- * Since: 0.20.9.
+ * Since: 0.20.9
  **/
 void
 gupnp_service_info_get_introspection_async_full
