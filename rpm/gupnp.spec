@@ -1,16 +1,15 @@
 Name:          gupnp
-Version:       0.20.10
+Version:       1.0.1
 Release:       1%{?dist}
 Summary:       A framework for creating UPnP devices & control points
 
 Group:         System Environment/Libraries
 License:       LGPLv2+
 URL:           http://www.gupnp.org/
-Source0:       http://download.gnome.org/sources/%{name}/0.20/%{name}-%{version}.tar.xz
+Source0:       http://download.gnome.org/sources/%{name}/1.0/%{name}-%{version}.tar.xz
 
-BuildRequires: gssdp-devel >= 0.14.0
+BuildRequires: gssdp-devel >= 0.14.5
 BuildRequires: gobject-introspection-devel >= 1.36
-BuildRequires: gnome-common
 BuildRequires: vala-devel
 BuildRequires: vala-tools
 BuildRequires: libsoup-devel
@@ -58,10 +57,10 @@ find %{buildroot} -name '*.la' -exec rm -f {} ';'
 %files
 %doc AUTHORS COPYING README
 %{_libdir}/libgupnp-1.0.so.*
-%{_bindir}/gupnp-binding-tool
 %{_libdir}/girepository-1.0/GUPnP-1.0.typelib
 
 %files devel
+%{_bindir}/gupnp-binding-tool
 %{_libdir}/pkgconfig/gupnp-1.0.pc
 %{_libdir}/libgupnp-1.0.so
 %{_includedir}/gupnp-1.0
