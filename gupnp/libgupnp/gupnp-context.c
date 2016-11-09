@@ -92,7 +92,7 @@ struct _GUPnPContextPrivate {
         SoupSession *session;
 
         SoupServer  *server; /* Started on demand */
-        char        *server_url;
+        SoupURI     *server_uri;
         char        *default_language;
 
         GList       *host_path_datas;
@@ -117,11 +117,12 @@ typedef struct {
 } UserAgent;
 
 typedef struct {
-        char *local_path;
-        char *server_path;
-        char *default_language;
+        char         *local_path;
+        char         *server_path;
+        char         *default_language;
 
-        GList *user_agents;
+        GList        *user_agents;
+        GUPnPContext *context;
 } HostPathData;
 
 static GInitableIface* initable_parent_iface = NULL;
@@ -191,12 +192,7 @@ gupnp_context_initable_init (GInitable     *initable,
 
         context = GUPNP_CONTEXT (initable);
 
-        context->priv->session = soup_session_async_new_with_options
-                (SOUP_SESSION_IDLE_TIMEOUT,
-                 60,
-                 SOUP_SESSION_ASYNC_CONTEXT,
-                 g_main_context_get_thread_default (),
-                 NULL);
+        context->priv->session = soup_session_new ();
 
         user_agent = g_strdup_printf ("%s GUPnP/" VERSION " DLNADOC/1.50",
                                       g_get_prgname ()? : "");
@@ -212,9 +208,6 @@ gupnp_context_initable_init (GInitable     *initable,
                 soup_session_add_feature (context->priv->session,
                                           SOUP_SESSION_FEATURE (logger));
         }
-
-        soup_session_add_feature_by_type (context->priv->session,
-                                          SOUP_TYPE_CONTENT_DECODER);
 
         /* Create the server already if the port is not null*/
         if (context->priv->port != 0) {
@@ -361,7 +354,9 @@ gupnp_context_finalize (GObject *object)
         context = GUPNP_CONTEXT (object);
 
         g_free (context->priv->default_language);
-        g_free (context->priv->server_url);
+
+        if (context->priv->server_uri)
+                soup_uri_free (context->priv->server_uri);
 
         /* Call super */
         object_class = G_OBJECT_CLASS (gupnp_context_parent_class);
@@ -375,7 +370,8 @@ gupnp_context_constructor (GType                  type,
 {
         GObjectClass *object_class;
         guint port = 0, msearch_port = 0;
-        int i, msearch_idx = -1;
+        guint i;
+        int msearch_idx = -1;
 
         for (i = 0; i < n_construct_params; i++) {
                 const char *par_name;
@@ -581,63 +577,59 @@ gupnp_context_get_server (GUPnPContext *context)
         g_return_val_if_fail (GUPNP_IS_CONTEXT (context), NULL);
 
         if (context->priv->server == NULL) {
-                const char *ip;
+                const char *ip = NULL;
+                guint port = 0;
+                GSocketAddress *addr = NULL;
+                GError *error = NULL;
 
-                ip =  gssdp_client_get_host_ip (GSSDP_CLIENT (context));
-                SoupAddress *addr = soup_address_new (ip, context->priv->port);
-                soup_address_resolve_sync (addr, NULL);
+                context->priv->server = soup_server_new (NULL, NULL);
 
-                context->priv->server = soup_server_new
-                        (SOUP_SERVER_PORT,
-                         context->priv->port,
-                         SOUP_SERVER_ASYNC_CONTEXT,
-                         g_main_context_get_thread_default (),
-                         SOUP_SERVER_INTERFACE,
-                         addr,
-                         NULL);
-                g_object_unref (addr);
+                soup_server_add_handler (context->priv->server,
+                                         NULL,
+                                         default_server_handler,
+                                         context,
+                                         NULL);
 
-                if (context->priv->server) {
-                        soup_server_add_handler (context->priv->server,
-                                                 NULL,
-                                                 default_server_handler,
-                                                 context,
-                                                 NULL);
+                ip = gssdp_client_get_host_ip (GSSDP_CLIENT (context));
+                port = context->priv->port;
+                addr = g_inet_socket_address_new_from_string (ip, port);
 
-                        soup_server_run_async (context->priv->server);
+                if (! soup_server_listen (context->priv->server,
+                                          addr, (SoupServerListenOptions) 0, &error)) {
+                        g_warning ("GUPnPContext: Unable to listen on %s:%u %s", ip, port, error->message);
+                        g_error_free (error);
                 }
+
+                g_object_unref (addr);
         }
 
         return context->priv->server;
 }
 
 /*
- * Makes an URL that refers to our server.
+ * Makes a SoupURI that refers to our server.
  **/
-static char *
-make_server_url (GUPnPContext *context)
+static SoupURI *
+make_server_uri (GUPnPContext *context)
 {
-        SoupServer *server;
-        guint port;
-
-        /* What port are we running on? */
-        server = gupnp_context_get_server (context);
-        port = soup_server_get_port (server);
-
-        /* Put it all together */
-        return g_strdup_printf
-                        ("http://%s:%u",
-                         gssdp_client_get_host_ip (GSSDP_CLIENT (context)),
-                         port);
+        SoupServer *server = gupnp_context_get_server (context);
+        GSList *uris = soup_server_get_uris (server);
+        if (uris)
+        {
+                SoupURI *uri = soup_uri_copy (uris->data);
+                g_slist_free_full (uris, (GDestroyNotify) soup_uri_free);
+                return uri;
+        }
+        return NULL;
 }
 
-const char *
-_gupnp_context_get_server_url (GUPnPContext *context)
+SoupURI *
+_gupnp_context_get_server_uri (GUPnPContext *context)
 {
-        if (context->priv->server_url == NULL)
-                context->priv->server_url = make_server_url (context);
+        if (context->priv->server_uri == NULL)
+                context->priv->server_uri = make_server_uri (context);
 
-        return (const char *) context->priv->server_url;
+        return soup_uri_copy (context->priv->server_uri);
 }
 
 /**
@@ -702,12 +694,12 @@ gupnp_context_get_host_ip (GUPnPContext *context)
 guint
 gupnp_context_get_port (GUPnPContext *context)
 {
-        SoupServer *server;
-
         g_return_val_if_fail (GUPNP_IS_CONTEXT (context), 0);
 
-        server = gupnp_context_get_server (context);
-        return soup_server_get_port (server);
+        if (context->priv->server_uri == NULL)
+                context->priv->server_uri = make_server_uri (context);
+
+        return soup_uri_get_port (context->priv->server_uri);
 }
 
 /**
@@ -778,11 +770,13 @@ void
 gupnp_context_set_default_language (GUPnPContext *context,
                                     const char   *language)
 {
+        char *old_language = NULL;
+
         g_return_if_fail (GUPNP_IS_CONTEXT (context));
         g_return_if_fail (language != NULL);
 
 
-        char *old_language = context->priv->default_language;
+        old_language = context->priv->default_language;
 
         if ((old_language != NULL) && (!strcmp (language, old_language)))
                 return;
@@ -904,6 +898,27 @@ redirect_to_folder (SoupMessage *msg)
         g_free (uri);
 }
 
+static void
+update_client_cache (GUPnPContext *context,
+                     const char   *host,
+                     const char   *user_agent)
+{
+        const char *entry;
+        GSSDPClient *client;
+
+        if (user_agent == NULL)
+                return;
+
+        client = GSSDP_CLIENT (context);
+
+        entry = gssdp_client_guess_user_agent (client, host);
+        if (!entry) {
+                gssdp_client_add_cache_entry (client,
+                                              host,
+                                              user_agent);
+        }
+}
+
 /* Serve @path. Note that we do not need to check for path including bogus
  * '..' as libsoup does this for us. */
 static void
@@ -949,6 +964,9 @@ host_path_handler (G_GNUC_UNUSED SoupServer        *server,
 
         user_agent = soup_message_headers_get_one (msg->request_headers,
                                                    "User-Agent");
+        update_client_cache (host_path_data->context,
+                             soup_client_context_get_host (client),
+                             user_agent);
 
         /* Construct base local path */
         local_path = construct_local_path (path, user_agent, host_path_data);
@@ -1162,7 +1180,8 @@ user_agent_free (UserAgent *agent)
 static HostPathData *
 host_path_data_new (const char *local_path,
                     const char *server_path,
-                    const char *default_language)
+                    const char *default_language,
+                    GUPnPContext *context)
 {
         HostPathData *path_data;
 
@@ -1171,6 +1190,7 @@ host_path_data_new (const char *local_path,
         path_data->local_path  = g_strdup (local_path);
         path_data->server_path = g_strdup (server_path);
         path_data->default_language = g_strdup (default_language);
+        path_data->context = context;
 
         return path_data;
 }
@@ -1214,7 +1234,8 @@ gupnp_context_host_path (GUPnPContext *context,
 
         path_data = host_path_data_new (local_path,
                                         server_path,
-                                        context->priv->default_language);
+                                        context->priv->default_language,
+                                        context);
 
         soup_server_add_handler (server,
                                  server_path,
@@ -1388,7 +1409,10 @@ gupnp_acl_server_handler (SoupServer *server,
 {
         AclServerHandler *handler = (AclServerHandler *) user_data;
         const char *agent;
+        const char *host;
         GUPnPDevice *device = NULL;
+
+        host = soup_client_context_get_host (client);
 
         if (handler->service) {
                 g_object_get (handler->service,
@@ -1402,6 +1426,11 @@ gupnp_acl_server_handler (SoupServer *server,
 
         agent = soup_message_headers_get_one (msg->request_headers,
                                               "User-Agent");
+        if (agent == NULL) {
+                agent = gssdp_client_guess_user_agent
+                                (GSSDP_CLIENT (handler->context),
+                                 host);
+        }
 
         if (handler->context->priv->acl != NULL) {
                 if (gupnp_acl_can_sync (handler->context->priv->acl)) {
@@ -1409,7 +1438,7 @@ gupnp_acl_server_handler (SoupServer *server,
                                                    device,
                                                    handler->service,
                                                    path,
-                                                   soup_client_context_get_host (client),
+                                                   host,
                                                    agent)) {
                                 soup_message_set_status (msg, SOUP_STATUS_FORBIDDEN);
 

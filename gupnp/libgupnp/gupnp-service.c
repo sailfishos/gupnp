@@ -38,16 +38,13 @@
 #include "gupnp-marshal.h"
 #include "gupnp-error.h"
 #include "gupnp-acl.h"
+#include "gupnp-uuid.h"
 #include "http-headers.h"
 #include "gena-protocol.h"
 #include "xml-util.h"
 #include "gvalue-util.h"
 
-#ifdef G_OS_WIN32
-#include <rpc.h>
-#else
-#include <uuid/uuid.h>
-#endif
+#include "guul.h"
 
 #define SUBSCRIPTION_TIMEOUT 300 /* DLNA (7.2.22.1) enforced */
 
@@ -56,19 +53,23 @@ G_DEFINE_TYPE (GUPnPService,
                GUPNP_TYPE_SERVICE_INFO);
 
 struct _GUPnPServicePrivate {
-        GUPnPRootDevice *root_device;
+        GUPnPRootDevice           *root_device;
 
-        SoupSession     *session;
+        SoupSession               *session;
 
-        guint            notify_available_id;
+        guint                      notify_available_id;
 
-        GHashTable      *subscriptions;
+        GHashTable                *subscriptions;
 
-        GList           *state_variables;
+        GList                     *state_variables;
 
-        GQueue          *notify_queue;
+        GQueue                    *notify_queue;
 
-        gboolean         notify_frozen;
+        gboolean                   notify_frozen;
+
+        GUPnPServiceIntrospection *introspection;
+
+        GList                     *pending_autoconnect;
 };
 
 enum {
@@ -92,6 +93,12 @@ static void
 notify_subscriber   (gpointer key,
                      gpointer value,
                      gpointer user_data);
+
+GUPnPServiceAction *
+gupnp_service_action_ref (GUPnPServiceAction *action);
+
+void
+gupnp_service_action_unref (GUPnPServiceAction *action);
 
 typedef struct {
         GUPnPService *service;
@@ -126,12 +133,8 @@ gupnp_service_get_session (GUPnPService *service)
                  * order. The session from GUPnPContext may use
                  * multiple connections.
                  */
-                service->priv->session = soup_session_async_new_with_options
-                  (SOUP_SESSION_IDLE_TIMEOUT, 60,
-                   SOUP_SESSION_ASYNC_CONTEXT,
-                   g_main_context_get_thread_default (),
-                   SOUP_SESSION_MAX_CONNS_PER_HOST, 1,
-                   NULL);
+                service->priv->session = soup_session_new_with_options (SOUP_SESSION_MAX_CONNS_PER_HOST, 1,
+                                                                        NULL);
 
                 if (g_getenv ("GUPNP_DEBUG")) {
                         SoupLogger *logger;
@@ -1092,34 +1095,32 @@ subscription_response (GUPnPService *service,
         soup_message_set_status (msg, SOUP_STATUS_OK);
 }
 
+/**
+ * gupnp_get_uuid:
+ *
+ * Generate and return a new UUID.
+ *
+ * Returns: (transfer full): A newly generated UUID in string representation.
+ */
+char *
+gupnp_get_uuid (void)
+{
+        return guul_get_uuid ();
+}
+
 /* Generates a new SID */
 static char *
 generate_sid (void)
 {
-#ifdef G_OS_WIN32
         char *ret = NULL;
-        UUID uuid;
-        RPC_STATUS stat;
-        stat = UuidCreate (&uuid);
-        if (stat == RPC_S_OK) {
-                unsigned char* uuidStr = NULL;
-                stat = UuidToString (&uuid, &uuidStr);
-                if (stat == RPC_S_OK) {
-                        ret = g_strdup_printf ("uuid:%s", uuidStr);
-                        RpcStringFree (&uuidStr);
-                }
-        }
+        char *uuid;
+
+
+        uuid = guul_get_uuid ();
+        ret = g_strdup_printf ("uuid:%s", uuid);
+        g_free (uuid);
 
         return ret;
-#else
-        uuid_t id;
-        char out[39];
-
-        uuid_generate (id);
-        uuid_unparse (id, out);
-
-        return g_strdup_printf ("uuid:%s", out);
-#endif
 }
 
 /* Subscription expired */
@@ -1308,8 +1309,6 @@ subscription_server_handler (G_GNUC_UNUSED SoupServer        *server,
                              gpointer                         user_data)
 {
         GUPnPService *service;
-        GUPnPContext *context;
-        GUPnPAcl *acl;
         const char *callback, *nt, *sid;
 
         service = GUPNP_SERVICE (user_data);
@@ -1386,6 +1385,26 @@ got_introspection (GUPnPServiceInfo          *info,
         gpointer data;
 
         if (introspection) {
+                /* Handle pending auto-connects */
+                service->priv->introspection  = g_object_ref (introspection);
+
+                /* _autoconnect() just calls prepend() so we reverse the list
+                 * here.
+                 */
+                service->priv->pending_autoconnect =
+                            g_list_reverse (service->priv->pending_autoconnect);
+
+                /* Re-call _autoconnect(). This will not fill
+                 * pending_autoconnect because we set the introspection member
+                 * variable before */
+                for (l = service->priv->pending_autoconnect; l; l = l->next)
+                        gupnp_service_signals_autoconnect (service,
+                                                           l->data,
+                                                           NULL);
+
+                g_list_free (service->priv->pending_autoconnect);
+                service->priv->pending_autoconnect = NULL;
+
                 state_variables =
                         gupnp_service_introspection_list_state_variables
                                 (introspection);
@@ -1467,8 +1486,8 @@ gupnp_service_constructor (GType                  type,
         handler = acl_server_handler_new (GUPNP_SERVICE (object),
                                           context,
                                           control_server_handler,
-                                          g_object_ref (object),
-                                          g_object_unref);
+                                          object,
+                                          NULL);
         _gupnp_context_add_server_handler_with_data (context, path, handler);
         g_free (path);
         g_free (url);
@@ -1479,8 +1498,8 @@ gupnp_service_constructor (GType                  type,
         handler = acl_server_handler_new (GUPNP_SERVICE (object),
                                           context,
                                           subscription_server_handler,
-                                          g_object_ref (object),
-                                          g_object_unref);
+                                          object,
+                                          NULL);
         _gupnp_context_add_server_handler_with_data (context, path, handler);
         g_free (path);
         g_free (url);
@@ -1641,6 +1660,11 @@ gupnp_service_finalize (GObject *object)
         if (service->priv->session) {
                 g_object_unref (service->priv->session);
                 service->priv->session = NULL;
+        }
+
+        if (service->priv->introspection) {
+                g_object_unref (service->priv->introspection);
+                service->priv->introspection = NULL;
         }
 
         /* Call super */
@@ -2237,18 +2261,22 @@ gupnp_service_signals_autoconnect (GUPnPService *service,
 
         g_return_if_fail (GUPNP_IS_SERVICE (service));
 
-        introspection = gupnp_service_info_get_introspection
-                                (GUPNP_SERVICE_INFO (service),
-                                 error);
-        if (!introspection)
+        introspection = service->priv->introspection;
+
+        if (!introspection) {
+                /* Initial introspection is not done yet, delay until we
+                 * received that */
+                service->priv->pending_autoconnect =
+                    g_list_prepend (service->priv->pending_autoconnect,
+                                    user_data);
+
                 return;
+        }
 
         /* Get a handle on the main executable -- use this to find symbols */
         module = g_module_open (NULL, 0);
         if (module == NULL) {
                 g_error ("Failed to open module: %s", g_module_error ());
-
-                g_object_unref (introspection);
 
                 return;
         }
@@ -2271,5 +2299,4 @@ gupnp_service_signals_autoconnect (GUPnPService *service,
                                           user_data);
 
         g_module_close (module);
-        g_object_unref (introspection);
 }

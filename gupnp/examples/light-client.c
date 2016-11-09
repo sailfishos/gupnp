@@ -58,7 +58,7 @@ send_cmd (GUPnPServiceProxy *proxy)
   /* Set the target */
   if (!gupnp_service_proxy_send_action (proxy, "SetTarget", &error,
                                         /* IN args */
-                                        "NewTargetValue", G_TYPE_BOOLEAN, target, NULL,
+                                        "newTargetValue", G_TYPE_BOOLEAN, target, NULL,
                                         /* OUT args */
                                         NULL)) {
     goto error;
@@ -119,10 +119,6 @@ main (int argc, char **argv)
   GError *error = NULL;
   GUPnPContext *context;
   GUPnPControlPoint *cp;
-
-#if !GLIB_CHECK_VERSION(2,35,0)
-  g_type_init ();
-#endif
 
   optionContext = g_option_context_new ("[on|off|toggle]");
   g_option_context_add_main_entries (optionContext, entries, NULL);

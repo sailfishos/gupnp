@@ -51,7 +51,7 @@ set_target_cb (GUPnPService          *service,
 
   /* Get the new target value */
   gupnp_service_action_get (action,
-                            "NewTargetValue", G_TYPE_BOOLEAN, &target,
+                            "newTargetValue", G_TYPE_BOOLEAN, &target,
                             NULL);
 
   /* If the new target doesn't match the current status, change the status and
@@ -133,10 +133,6 @@ main (G_GNUC_UNUSED int argc, G_GNUC_UNUSED char **argv)
   GUPnPRootDevice *dev;
   GUPnPServiceInfo *service;
   
-#if !GLIB_CHECK_VERSION(2,35,0)
-  g_type_init ();
-#endif
-
   optionContext = g_option_context_new (NULL);
   g_option_context_add_main_entries (optionContext, entries, NULL);
   if (!g_option_context_parse (optionContext, &argc, &argv, &error))

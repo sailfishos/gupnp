@@ -30,6 +30,9 @@ G_BEGIN_DECLS
 GType
 gupnp_service_proxy_get_type (void) G_GNUC_CONST;
 
+GType
+gupnp_service_proxy_action_get_type (void) G_GNUC_CONST;
+
 #define GUPNP_TYPE_SERVICE_PROXY \
                 (gupnp_service_proxy_get_type ())
 #define GUPNP_SERVICE_PROXY(obj) \
@@ -140,7 +143,6 @@ gupnp_service_proxy_send_action_hash
                                     GHashTable                     *out_hash) G_GNUC_DEPRECATED;
 #endif
 
-
 gboolean
 gupnp_service_proxy_send_action_list (GUPnPServiceProxy *proxy,
                                       const char        *action,
@@ -151,7 +153,15 @@ gupnp_service_proxy_send_action_list (GUPnPServiceProxy *proxy,
                                       GList             *out_types,
                                       GList            **out_values);
 
-
+gboolean
+gupnp_service_proxy_send_action_list_gi (GUPnPServiceProxy *proxy,
+                                         const char        *action,
+                                         GList             *in_names,
+                                         GList             *in_values,
+                                         GList             *out_names,
+                                         GList             *out_types,
+                                         GList            **out_values,
+                                         GError           **error);
 GUPnPServiceProxyAction *
 gupnp_service_proxy_begin_action   (GUPnPServiceProxy              *proxy,
                                     const char                     *action,
@@ -209,6 +219,22 @@ gupnp_service_proxy_end_action_list
                                    GList                  **out_values);
 
 gboolean
+gupnp_service_proxy_end_action_list_gi
+                                  (GUPnPServiceProxy       *proxy,
+                                   GUPnPServiceProxyAction *action,
+                                   GList                   *out_names,
+                                   GList                   *out_types,
+                                   GList                  **out_values,
+                                   GError                  **error);
+
+gboolean
+gupnp_service_proxy_end_action_hash_gi
+                                   (GUPnPServiceProxy              *proxy,
+                                    GUPnPServiceProxyAction        *action,
+                                    GHashTable                     *hash,
+                                    GError                        **error);
+
+gboolean
 gupnp_service_proxy_end_action_hash
                                    (GUPnPServiceProxy              *proxy,
                                     GUPnPServiceProxyAction        *action,
@@ -258,6 +284,7 @@ gupnp_service_proxy_set_subscribed (GUPnPServiceProxy              *proxy,
 
 gboolean
 gupnp_service_proxy_get_subscribed (GUPnPServiceProxy              *proxy);
+
 
 G_END_DECLS
 

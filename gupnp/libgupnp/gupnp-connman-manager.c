@@ -33,6 +33,8 @@
 #include "gupnp-context.h"
 #include "gupnp-marshal.h"
 
+#define SERVICE_CREATION_TIMEOUT 1000
+
 typedef enum
 {
         CM_SERVICE_STATE_ACTIVE   = 1,
@@ -44,12 +46,13 @@ typedef struct {
         GUPnPConnmanManager *manager;
         GUPnPContext        *context;
         GDBusProxy          *proxy;
+        GCancellable        *cancellable;
         CMServiceState      current;
         guint               sig_prop_id;
         guint               port;
         gchar               *iface;
         gchar               *name;
-
+        guint               timeout;
 } CMService;
 
 struct _GUPnPConnmanManagerPrivate {
@@ -58,6 +61,7 @@ struct _GUPnPConnmanManagerPrivate {
         GHashTable *cm_services;
         guint      sig_change_id;
         GDBusConnection *system_bus;
+        GCancellable *cancellable;
 };
 
 #define CM_DBUS_CONNMAN_NAME      "net.connman"
@@ -147,16 +151,48 @@ service_context_delete (CMService *cm_service)
         cm_service->context = NULL;
 }
 
+static gboolean
+service_context_create_timeout (CMService *cm_service)
+{
+        cm_service->timeout = 0;
+
+        g_return_val_if_fail (cm_service->current == CM_SERVICE_STATE_ACTIVE, FALSE);
+
+        if (service_context_create (cm_service) == FALSE) {
+                cm_service->current = CM_SERVICE_STATE_INACTIVE;
+        }
+
+        return FALSE;
+}
+
+static void
+service_context_remove_creation_timeout (CMService *cm_service)
+{
+        if (cm_service->timeout) {
+                g_source_remove (cm_service->timeout);
+                cm_service->timeout = 0;
+        }
+}
+
+static void
+service_context_install_creation_timeout (CMService *cm_service)
+{
+        service_context_remove_creation_timeout (cm_service);
+
+        cm_service->timeout = g_timeout_add (SERVICE_CREATION_TIMEOUT,
+                                             (GSourceFunc) service_context_create_timeout,
+                                             cm_service);
+}
+
 static void
 service_context_update (CMService *cm_service, CMServiceState new_state)
 {
         if (cm_service->current != new_state) {
                 if (new_state == CM_SERVICE_STATE_ACTIVE) {
-                        if (service_context_create (cm_service) == FALSE)
-                                new_state = CM_SERVICE_STATE_INACTIVE;
-
-                } else if ((new_state == CM_SERVICE_STATE_INACTIVE) &&
-                           (cm_service->context != NULL)) {
+                        service_context_install_creation_timeout (cm_service);
+                } else if (new_state == CM_SERVICE_STATE_INACTIVE) {
+                        service_context_remove_creation_timeout (cm_service);
+                        if (cm_service->context != NULL)
                                 service_context_delete (cm_service);
                 }
 
@@ -165,28 +201,20 @@ service_context_update (CMService *cm_service, CMServiceState new_state)
 }
 
 static void
-on_service_property_signal (GDBusConnection *connection,
-                            const gchar     *sender_name,
-                            const gchar     *object_path,
-                            const gchar     *interface_name,
-                            const gchar     *signal_name,
-                            GVariant        *parameters,
-                            gpointer        user_data)
+on_service_property_changed (CMService   *cm_service,
+                             const gchar *name,
+                             GVariant    *value)
 {
-        CMService      *cm_service;
-        GVariant       *value;
-        gchar          *name;
-        const gchar    *state_str;
         CMServiceState new_state;
-
-        cm_service = (CMService *) user_data;
-        g_variant_get (parameters, "(&sv)", &name, &value);
+        const gchar *state_str;
 
         if (g_strcmp0 (name, "Name") == 0) {
                 g_free (cm_service->name);
                 g_variant_get (value, "s", &cm_service->name);
 
-                if (cm_service->context != NULL)
+                if (cm_service->context != NULL &&
+                    g_strcmp0 (cm_service->name,
+                               gssdp_client_get_network (GSSDP_CLIENT (cm_service->context))) != 0)
                         g_object_set (G_OBJECT (cm_service->context),
                                                "network",
                                                cm_service->name,
@@ -196,11 +224,12 @@ on_service_property_signal (GDBusConnection *connection,
                 g_free (cm_service->iface);
                 g_variant_lookup (value, "Interface", "s", &cm_service->iface);
 
-                if (cm_service->context != NULL)
-                        g_object_set (G_OBJECT (cm_service->context),
-                                               "interface",
-                                               cm_service->iface,
-                                               NULL);
+                if (cm_service->context != NULL &&
+                    g_strcmp0 (cm_service->iface,
+                               gssdp_client_get_interface (GSSDP_CLIENT (cm_service->context))) != 0) {
+                        service_context_delete (cm_service);
+                        service_context_create (cm_service);
+                }
 
         } else if (g_strcmp0 (name, "State") == 0) {
                 state_str = g_variant_get_string (value, 0);
@@ -213,6 +242,25 @@ on_service_property_signal (GDBusConnection *connection,
 
                 service_context_update (cm_service, new_state);
         }
+}
+
+static void
+on_service_property_signal (GDBusConnection *connection,
+                            const gchar     *sender_name,
+                            const gchar     *object_path,
+                            const gchar     *interface_name,
+                            const gchar     *signal_name,
+                            GVariant        *parameters,
+                            gpointer        user_data)
+{
+        CMService *cm_service;
+        GVariant  *value;
+        gchar     *name;
+
+        cm_service = (CMService *) user_data;
+        g_variant_get (parameters, "(&sv)", &name, &value);
+
+        on_service_property_changed (cm_service, name, value);
 
         g_variant_unref (value);
 }
@@ -235,17 +283,26 @@ cm_service_new (GUPnPConnmanManager *manager,
 static void
 cm_service_free (CMService *cm_service)
 {
-        GDBusConnection *cnx;
+        if (cm_service->proxy != NULL) {
+                GDBusConnection *cnx;
 
-        cnx = g_dbus_proxy_get_connection (cm_service->proxy);
+                cnx = g_dbus_proxy_get_connection (cm_service->proxy);
 
-        if (cm_service->sig_prop_id) {
-                g_dbus_connection_signal_unsubscribe (cnx,
-                                                      cm_service->sig_prop_id);
-                cm_service->sig_prop_id = 0;
+                if (cm_service->sig_prop_id) {
+                        g_dbus_connection_signal_unsubscribe (cnx,
+                                                              cm_service->sig_prop_id);
+                        cm_service->sig_prop_id = 0;
+                }
+
+                g_object_unref (cm_service->proxy);
         }
 
-        g_object_unref (cm_service->proxy);
+        if (cm_service->cancellable != NULL) {
+                g_cancellable_cancel (cm_service->cancellable);
+                g_object_unref (cm_service->cancellable);
+        }
+
+        service_context_remove_creation_timeout (cm_service);
 
         if (cm_service->context != NULL) {
                 g_signal_emit_by_name (cm_service->manager,
@@ -258,6 +315,57 @@ cm_service_free (CMService *cm_service)
         g_free (cm_service->iface);
         g_free (cm_service->name);
         g_slice_free (CMService, cm_service);
+}
+
+static void
+get_properties_cb (GObject      *source_object,
+                   GAsyncResult *res,
+                   gpointer     user_data)
+{
+        CMService    *cm_service;
+        GVariant     *ret;
+        GVariant     *dict;
+        GVariant     *value;
+        GVariantIter  iter;
+        gchar        *key;
+        GError       *error = NULL;
+
+        ret = g_dbus_proxy_call_finish (G_DBUS_PROXY (source_object),
+                                        res,
+                                        &error);
+
+        if (error != NULL) {
+                if (!g_error_matches (error, G_IO_ERROR, G_IO_ERROR_CANCELLED))
+                        g_warning ("Error fetching properties: %s", error->message);
+                g_error_free (error);
+
+                return;
+        }
+
+        if (ret == NULL) {
+                g_warning ("Failed fetching properties but no error");
+
+                return;
+        }
+
+        if (g_variant_is_container (ret) != TRUE)
+        {
+                g_warning ("Unexpected result type: %s", g_variant_get_type_string (ret));
+		g_variant_unref (ret);
+
+                return;
+        }
+
+        cm_service = user_data;
+
+        dict = g_variant_get_child_value (ret, 0);
+        g_variant_iter_init (&iter, dict);
+
+        while (g_variant_iter_loop (&iter, "{sv}", &key, &value))
+                on_service_property_changed (cm_service, key, value);
+
+        g_variant_unref (dict);
+        g_variant_unref (ret);
 }
 
 static void
@@ -279,6 +387,15 @@ cm_service_use (GUPnPConnmanManager *manager,
                                 on_service_property_signal,
                                 cm_service,
                                 NULL);
+
+        g_dbus_proxy_call (cm_service->proxy,
+                           "GetProperties",
+                           NULL,
+                           G_DBUS_CALL_FLAGS_NONE,
+                           -1,
+                           cm_service->cancellable,
+                           get_properties_cb,
+                           cm_service);
 
         if (cm_service->current == CM_SERVICE_STATE_ACTIVE)
                 if (service_context_create (cm_service) == FALSE)
@@ -315,7 +432,7 @@ cm_service_update (CMService *cm_service, GVariant *dict, guint port)
                     (g_strcmp0 (state, "ready") == 0))
                         new_state = CM_SERVICE_STATE_ACTIVE;
 
-        if (is_name && (g_strcmp0 (cm_service->name, name) == 0)) {
+        if (is_name && (g_strcmp0 (cm_service->name, name) != 0)) {
                 g_free (cm_service->name);
                 cm_service->name = name;
 
@@ -326,15 +443,14 @@ cm_service_update (CMService *cm_service, GVariant *dict, guint port)
                                       NULL);
         }
 
-        if (is_iface && (g_strcmp0 (cm_service->iface, iface) == 0)) {
+        if (is_iface && (g_strcmp0 (cm_service->iface, iface) != 0)) {
                 g_free (cm_service->iface);
                 cm_service->iface = iface;
 
-                if (cm_service->context != NULL)
-                        g_object_set (G_OBJECT (cm_service->context),
-                                      "interface",
-                                      cm_service->iface,
-                                      NULL);
+                if (cm_service->context != NULL) {
+                        service_context_delete (cm_service);
+                        service_context_create (cm_service);
+                }
         }
 
         cm_service->port = port;
@@ -355,7 +471,8 @@ service_proxy_new_cb (GObject      *source_object,
         service_proxy = g_dbus_proxy_new_for_bus_finish (res, &error);
 
         if (error != NULL) {
-                g_warning ("Failed to create D-Bus proxy: %s", error->message);
+                if (!g_error_matches (error, G_IO_ERROR, G_IO_ERROR_CANCELLED))
+                        g_warning ("Failed to create D-Bus proxy: %s", error->message);
                 g_error_free (error);
 
                 return;
@@ -418,6 +535,8 @@ cm_service_add (GUPnPConnmanManager *manager,
                              g_strdup (path),
                              cm_service);
 
+        cm_service->cancellable = g_cancellable_new ();
+
         g_dbus_proxy_new_for_bus (G_BUS_TYPE_SYSTEM,
                                   G_DBUS_PROXY_FLAGS_DO_NOT_LOAD_PROPERTIES |
                                   G_DBUS_PROXY_FLAGS_DO_NOT_CONNECT_SIGNALS,
@@ -425,7 +544,7 @@ cm_service_add (GUPnPConnmanManager *manager,
                                   CM_DBUS_CONNMAN_NAME,
                                   path,
                                   CM_DBUS_SERVICE_INTERFACE,
-                                  NULL,
+                                  cm_service->cancellable,
                                   service_proxy_new_cb,
                                   manager);
 }
@@ -531,7 +650,8 @@ get_services_cb (GObject      *source_object,
                                         &error);
 
         if (error != NULL) {
-                g_warning ("Error fetching service list: %s", error->message);
+                if (!g_error_matches (error, G_IO_ERROR, G_IO_ERROR_CANCELLED))
+                        g_warning ("Error fetching service list: %s", error->message);
                 g_error_free (error);
 
                 return;
@@ -620,7 +740,7 @@ init_connman_manager (GUPnPConnmanManager *manager)
                            NULL,
                            G_DBUS_CALL_FLAGS_NONE,
                            -1,
-                           NULL,
+                           priv->cancellable,
                            get_services_cb,
                            manager);
 
@@ -669,6 +789,12 @@ gupnp_connman_manager_dispose (GObject *object)
                 priv->cm_services = NULL;
         }
 
+        if (priv->cancellable != NULL)  {
+                g_cancellable_cancel (priv->cancellable);
+                g_object_unref (priv->cancellable);
+                priv->cancellable = NULL;
+        }
+
         g_clear_object (&(priv->system_bus));
 
         /* Call super */
@@ -684,6 +810,7 @@ gupnp_connman_manager_constructed (GObject *object)
 
         manager = GUPNP_CONNMAN_MANAGER (object);
 
+        manager->priv->cancellable = g_cancellable_new ();
         manager->priv->system_bus = g_bus_get_sync (G_BUS_TYPE_SYSTEM,
                                                     NULL,
                                                     NULL);

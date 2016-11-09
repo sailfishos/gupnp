@@ -81,6 +81,7 @@ enum {
 static guint signals[LAST_SIGNAL];
 
 struct _GUPnPServiceProxyAction {
+        volatile gint ref_count;
         GUPnPServiceProxy *proxy;
 
         SoupMessage *msg;
@@ -122,17 +123,47 @@ subscribe (GUPnPServiceProxy *proxy);
 static void
 unsubscribe (GUPnPServiceProxy *proxy);
 
+static GUPnPServiceProxyAction *
+gupnp_service_proxy_action_ref (GUPnPServiceProxyAction *action);
+
 static void
-gupnp_service_proxy_action_free (GUPnPServiceProxyAction *action)
+gupnp_service_proxy_action_unref (GUPnPServiceProxyAction *action);
+
+static GUPnPServiceProxyAction *
+gupnp_service_proxy_action_ref (GUPnPServiceProxyAction *action)
 {
-        action->proxy->priv->pending_actions =
-                g_list_remove (action->proxy->priv->pending_actions, action);
+        g_return_val_if_fail (action, NULL);
+        g_return_val_if_fail (action->ref_count > 0, NULL);
 
-        if (action->msg != NULL)
-                g_object_unref (action->msg);
+        g_atomic_int_inc (&action->ref_count);
 
-        g_slice_free (GUPnPServiceProxyAction, action);
+        return action;
 }
+
+static void
+gupnp_service_proxy_action_unref (GUPnPServiceProxyAction *action)
+{
+
+        g_return_if_fail (action);
+        g_return_if_fail (action->ref_count > 0);
+
+
+        if (g_atomic_int_dec_and_test (&action->ref_count)) {
+                if (action->proxy != NULL) {
+                        g_object_remove_weak_pointer (G_OBJECT (action->proxy),
+                                                      (gpointer *)&(action->proxy));
+                        action->proxy->priv->pending_actions =
+                                g_list_remove (action->proxy->priv->pending_actions, action);
+                }
+
+                if (action->msg != NULL)
+                        g_object_unref (action->msg);
+
+                g_slice_free (GUPnPServiceProxyAction, action);
+        }
+}
+
+G_DEFINE_BOXED_TYPE (GUPnPServiceProxyAction, gupnp_service_proxy_action, gupnp_service_proxy_action_ref, gupnp_service_proxy_action_unref)
 
 static void
 callback_data_free (CallbackData *data)
@@ -263,6 +294,9 @@ gupnp_service_proxy_dispose (GObject *object)
                 GUPnPServiceProxyAction *action;
 
                 action = proxy->priv->pending_actions->data;
+                proxy->priv->pending_actions =
+                        g_list_delete_link (proxy->priv->pending_actions,
+                                            proxy->priv->pending_actions);
 
                 gupnp_service_proxy_cancel_action (proxy, action);
         }
@@ -477,23 +511,23 @@ stop_main_loop (G_GNUC_UNUSED GUPnPServiceProxy       *proxy,
          \
                 while (arg_name != NULL) { \
                         GValue *value = g_new0 (GValue, 1); \
-                        gchar *error = NULL; \
+                        gchar *__error = NULL; \
                         GType type = va_arg (var_args, GType); \
          \
                         G_VALUE_COLLECT_INIT (value, \
                                               type, \
                                               var_args, \
                                               G_VALUE_NOCOPY_CONTENTS, \
-                                              &error); \
-                        if (error == NULL) { \
+                                              &__error); \
+                        if (__error == NULL) { \
                                 names = g_list_prepend (names, g_strdup (arg_name)); \
                                 values = g_list_prepend (values, value); \
                         } else { \
                                 g_warning ("Failed to collect value of type %s for %s: %s", \
                                            g_type_name (type), \
                                            arg_name, \
-                                           error); \
-                                g_free (error); \
+                                           __error); \
+                                g_free (__error); \
                         } \
                         arg_name = va_arg (var_args, const gchar *); \
                 } \
@@ -520,15 +554,15 @@ stop_main_loop (G_GNUC_UNUSED GUPnPServiceProxy       *proxy,
                                            g_type_name (type), \
                                            arg_name); \
                         } else { \
-                                gchar *error = NULL; \
+                                gchar *__error = NULL; \
          \
-                                G_VALUE_LCOPY (value, var_args, 0, &error); \
-                                if (error != NULL) { \
+                                G_VALUE_LCOPY (value, var_args, 0, &__error); \
+                                if (__error != NULL) { \
                                         g_warning ("Failed to lcopy the value of type %s for %s: %s", \
                                                    g_type_name (type), \
                                                    arg_name, \
-                                                   error); \
-                                        g_free (error); \
+                                                   __error); \
+                                        g_free (__error); \
                                 } \
                         } \
                         arg_name = va_arg (var_args, const gchar *); \
@@ -628,7 +662,7 @@ out:
 }
 
 /**
- * gupnp_service_proxy_send_action_hash:
+ * gupnp_service_proxy_send_action_hash: (skip)
  * @proxy: A #GUPnPServiceProxy
  * @action: An action
  * @error: (allow-none): The location where to store any error, or %NULL
@@ -693,7 +727,42 @@ gupnp_service_proxy_send_action_hash (GUPnPServiceProxy *proxy,
 }
 
 /**
- * gupnp_service_proxy_send_action_list:
+ * gupnp_service_proxy_send_action_list_gi: (rename-to gupnp_service_proxy_send_action_list)
+ * @proxy: (transfer none) : A #GUPnPServiceProxy
+ * @action: An action
+ * @error: The location where to store any error, or %NULL
+ * @in_names: (element-type utf8) (transfer none): #GList of 'in' parameter
+ * names (as strings)
+ * @in_values: (element-type GValue) (transfer none): #GList of values (as
+ * #GValue) that line up with @in_names
+ * @out_names: (element-type utf8) (transfer none): #GList of 'out' parameter
+ * names (as strings)
+ * @out_types: (element-type GType) (transfer none): #GList of types (as #GType)
+ * that line up with @out_names
+ * @out_values: (element-type GValue) (transfer full) (out): #GList of values
+ * (as #GValue) that line up with @out_names and @out_types.
+ *
+ * The synchronous variant of #gupnp_service_proxy_begin_action_list and
+ * #gupnp_service_proxy_end_action_list.
+ *
+ * Return value: %TRUE if sending the action was succesful.
+ *
+ **/
+gboolean
+gupnp_service_proxy_send_action_list_gi (GUPnPServiceProxy *proxy,
+                                         const char        *action,
+                                         GList             *in_names,
+                                         GList             *in_values,
+                                         GList             *out_names,
+                                         GList             *out_types,
+                                         GList            **out_values,
+                                         GError           **error)
+{
+    return gupnp_service_proxy_send_action_list (proxy, action, error, in_names, in_values, out_names, out_types, out_values);
+}
+
+/**
+ * gupnp_service_proxy_send_action_list: (skip)
  * @proxy: A #GUPnPServiceProxy
  * @action: An action
  * @error: (allow-none): The location where to store any error, or %NULL
@@ -816,8 +885,10 @@ begin_action_msg (GUPnPServiceProxy              *proxy,
 
         /* Create action structure */
         ret = g_slice_new (GUPnPServiceProxyAction);
+        ret->ref_count = 1;
 
         ret->proxy = proxy;
+        g_object_add_weak_pointer (G_OBJECT (proxy), (gpointer *)&(ret->proxy));
 
         ret->callback  = callback;
         ret->user_data = user_data;
@@ -1113,7 +1184,7 @@ gupnp_service_proxy_begin_action_list
 }
 
 /**
- * gupnp_service_proxy_begin_action_hash:
+ * gupnp_service_proxy_begin_action_hash: (skip)
  * @proxy: A #GUPnPServiceProxy
  * @action: An action
  * @callback: (scope async): The callback to call when sending the action has succeeded
@@ -1405,7 +1476,38 @@ gupnp_service_proxy_end_action_valist (GUPnPServiceProxy       *proxy,
 }
 
 /**
- * gupnp_service_proxy_end_action_list:
+ * gupnp_service_proxy_end_action_list_gi: (rename-to gupnp_service_proxy_end_action_list)
+ * @proxy: A #GUPnPServiceProxy
+ * @action: A #GUPnPServiceProxyAction handle
+ * @error: The location where to store any error, or %NULL
+ * @out_names: (element-type utf8) (transfer none): #GList of 'out' parameter
+ * names (as strings)
+ * @out_types: (element-type GType) (transfer none): #GList of types (as #GType)
+ * that line up with @out_names
+ * @out_values: (element-type GValue) (transfer full) (out): #GList of values
+ * (as #GValue) that line up with @out_names and @out_types.
+ *
+ * A variant of #gupnp_service_proxy_end_action that takes lists of
+ * out-parameter names, types and place-holders for values. The returned list
+ * in @out_values must be freed using #g_list_free and each element in it using
+ * #g_value_unset and #g_slice_free.
+ *
+ * Return value : %TRUE on success.
+ *
+ **/
+gboolean
+gupnp_service_proxy_end_action_list_gi (GUPnPServiceProxy       *proxy,
+                                        GUPnPServiceProxyAction *action,
+                                        GList                   *out_names,
+                                        GList                   *out_types,
+                                        GList                  **out_values,
+                                        GError                 **error)
+{
+    return gupnp_service_proxy_end_action_list (proxy, action, error, out_names, out_types, out_values);
+}
+
+/**
+ * gupnp_service_proxy_end_action_list: (skip)
  * @proxy: A #GUPnPServiceProxy
  * @action: A #GUPnPServiceProxyAction handle
  * @error: (allow-none): The location where to store any error, or %NULL
@@ -1422,6 +1524,7 @@ gupnp_service_proxy_end_action_valist (GUPnPServiceProxy       *proxy,
  * #g_value_unset and #g_slice_free.
  *
  * Returns: %TRUE on success.
+ *
  **/
 gboolean
 gupnp_service_proxy_end_action_list (GUPnPServiceProxy       *proxy,
@@ -1446,7 +1549,7 @@ gupnp_service_proxy_end_action_list (GUPnPServiceProxy       *proxy,
         /* Check for saved error from begin_action() */
         if (action->error) {
                 g_propagate_error (error, action->error);
-                gupnp_service_proxy_action_free (action);
+                gupnp_service_proxy_action_unref (action);
 
                 return FALSE;
         }
@@ -1454,7 +1557,7 @@ gupnp_service_proxy_end_action_list (GUPnPServiceProxy       *proxy,
         /* Check response for errors and do initial parsing */
         response = check_action_response (proxy, action, &params, error);
         if (response == NULL) {
-                gupnp_service_proxy_action_free (action);
+                gupnp_service_proxy_action_unref (action);
 
                 return FALSE;
         }
@@ -1477,7 +1580,7 @@ gupnp_service_proxy_end_action_list (GUPnPServiceProxy       *proxy,
         *out_values = out_values_list;
 
         /* Cleanup */
-        gupnp_service_proxy_action_free (action);
+        gupnp_service_proxy_action_unref (action);
 
         xmlFreeDoc (response);
 
@@ -1485,11 +1588,34 @@ gupnp_service_proxy_end_action_list (GUPnPServiceProxy       *proxy,
 }
 
 /**
- * gupnp_service_proxy_end_action_hash:
+ * gupnp_service_proxy_end_action_hash_gi: (rename-to gupnp_service_proxy_end_action_hash)
  * @proxy: A #GUPnPServiceProxy
  * @action: A #GUPnPServiceProxyAction handle
  * @error: The location where to store any error, or %NULL
  * @hash: (element-type utf8 GValue) (inout) (transfer none): A #GHashTable of
+ * out parameter name and initialised #GValue pairs
+ *
+ * See gupnp_service_proxy_end_action(); this version takes a #GHashTable for
+ * runtime generated parameter lists.
+ *
+ * Return value: %TRUE on success.
+ *
+ **/
+gboolean
+gupnp_service_proxy_end_action_hash_gi (GUPnPServiceProxy       *proxy,
+                                        GUPnPServiceProxyAction *action,
+                                        GHashTable              *hash,
+                                        GError                 **error)
+{
+    return gupnp_service_proxy_end_action_hash (proxy, action, error, hash);
+}
+
+/**
+ * gupnp_service_proxy_end_action_hash:
+ * @proxy: A #GUPnPServiceProxy
+ * @action: A #GUPnPServiceProxyAction handle
+ * @error: The location where to store any error, or %NULL
+ * @hash: (element-type utf8 GValue) (out caller-allocates) (transfer none): A #GHashTable of
  * out parameter name and initialised #GValue pairs
  *
  * See gupnp_service_proxy_end_action(); this version takes a #GHashTable for
@@ -1513,7 +1639,7 @@ gupnp_service_proxy_end_action_hash (GUPnPServiceProxy       *proxy,
         /* Check for saved error from begin_action() */
         if (action->error) {
                 g_propagate_error (error, action->error);
-                gupnp_service_proxy_action_free (action);
+                gupnp_service_proxy_action_unref (action);
 
                 return FALSE;
         }
@@ -1521,7 +1647,7 @@ gupnp_service_proxy_end_action_hash (GUPnPServiceProxy       *proxy,
         /* Check response for errors and do initial parsing */
         response = check_action_response (proxy, action, &params, error);
         if (response == NULL) {
-                gupnp_service_proxy_action_free (action);
+                gupnp_service_proxy_action_unref (action);
 
                 return FALSE;
         }
@@ -1530,7 +1656,7 @@ gupnp_service_proxy_end_action_hash (GUPnPServiceProxy       *proxy,
         g_hash_table_foreach (hash, (GHFunc) read_out_parameter, params);
 
         /* Cleanup */
-        gupnp_service_proxy_action_free (action);
+        gupnp_service_proxy_action_unref (action);
 
         xmlFreeDoc (response);
 
@@ -1568,7 +1694,7 @@ gupnp_service_proxy_cancel_action (GUPnPServiceProxy       *proxy,
         if (action->error != NULL)
                 g_error_free (action->error);
 
-        gupnp_service_proxy_action_free (action);
+        gupnp_service_proxy_action_unref (action);
 }
 
 /**
@@ -2275,10 +2401,17 @@ subscribe (GUPnPServiceProxy *proxy)
         SoupMessage *msg;
         SoupSession *session;
         SoupServer *server;
-        const char *server_url;
+        SoupURI *uri;
+        char *uri_string;
         char *sub_url, *delivery_url, *timeout;
 
-        context = gupnp_service_info_get_context (GUPNP_SERVICE_INFO (proxy));
+        /* Remove subscription timeout */
+        if (proxy->priv->subscription_timeout_src) {
+                g_source_destroy (proxy->priv->subscription_timeout_src);
+                proxy->priv->subscription_timeout_src = NULL;
+        }
+
+	context = gupnp_service_info_get_context (GUPNP_SERVICE_INFO (proxy));
 
         /* Create subscription message */
         sub_url = gupnp_service_info_get_event_subscription_url
@@ -2315,10 +2448,13 @@ subscribe (GUPnPServiceProxy *proxy)
         }
 
         /* Add headers */
-        server_url = _gupnp_context_get_server_url (context);
-        delivery_url = g_strdup_printf ("<%s%s>",
-                                        server_url,
-                                        proxy->priv->path);
+        uri = _gupnp_context_get_server_uri (context);
+        soup_uri_set_path (uri, proxy->priv->path);
+        uri_string = soup_uri_to_string (uri, FALSE);
+        soup_uri_free (uri);
+        delivery_url = g_strdup_printf ("<%s>", uri_string);
+        g_free (uri_string);
+
         soup_message_headers_append (msg->request_headers,
                                      "Callback",
                                      delivery_url);

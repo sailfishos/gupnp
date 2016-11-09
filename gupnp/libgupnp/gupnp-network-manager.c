@@ -129,7 +129,7 @@ nm_device_new (GUPnPNetworkManager *manager,
         nm_device = g_slice_new0 (NMDevice);
 
         g_atomic_int_set (&nm_device->ref_count, 1);
-        nm_device->manager = g_object_ref (manager);
+        nm_device->manager = manager;
         nm_device->proxy = g_object_ref (device_proxy);
 
         return nm_device;
@@ -155,16 +155,13 @@ nm_device_unref (NMDevice *nm_device)
         if (nm_device->ap_proxy != NULL)
                 g_object_unref (nm_device->ap_proxy);
 
-        if (nm_device->context != NULL) {
+        if (nm_device->manager != NULL && nm_device->context != NULL) {
                 g_signal_emit_by_name (nm_device->manager,
                                        "context-unavailable",
                                        nm_device->context);
 
                 g_object_unref (nm_device->context);
         }
-
-        g_object_unref (nm_device->proxy);
-        g_object_unref (nm_device->manager);
 
         g_slice_free (NMDevice, nm_device);
 }
@@ -280,7 +277,10 @@ ap_proxy_new_cb (GObject      *source_object,
 
         nm_device->ap_proxy = g_dbus_proxy_new_for_bus_finish (res, &error);
         if (G_UNLIKELY (error != NULL)) {
-                g_message ("Failed to create D-Bus proxy: %s", error->message);
+                if (!g_error_matches (error, G_IO_ERROR, G_IO_ERROR_CANCELLED))
+                        g_message ("Failed to create D-Bus proxy: %s", error->message);
+                else
+                        nm_device->manager = NULL;
                 g_error_free (error);
                 goto done;
         }
@@ -379,7 +379,7 @@ use_new_device (GUPnPNetworkManager *manager,
         GVariant *value;
 
         manager->priv->nm_devices = g_list_append (manager->priv->nm_devices,
-                                                   nm_device);
+                                                   nm_device_ref (nm_device));
 
         g_signal_connect (nm_device->proxy,
                           "g-signal",
@@ -416,7 +416,10 @@ wifi_proxy_new_cb (GObject      *source_object,
 
         nm_device->wifi_proxy = g_dbus_proxy_new_for_bus_finish (res, &error);
         if (G_UNLIKELY (error != NULL)) {
-                g_message ("Failed to create D-Bus proxy: %s", error->message);
+                if (!g_error_matches (error, G_IO_ERROR, G_IO_ERROR_CANCELLED))
+                        g_message ("Failed to create D-Bus proxy: %s", error->message);
+                else
+                        nm_device->manager = NULL;
                 g_error_free (error);
                 goto done;
         }
@@ -433,32 +436,31 @@ device_proxy_new_cb (GObject      *source_object,
                      gpointer      user_data) {
         GUPnPNetworkManager *manager;
         GDBusProxy *device_proxy;
-        NMDevice *nm_device;
+        NMDevice *nm_device = NULL;
         NMDeviceType type;
         GVariant *value;
         GError *error;
 
-        manager = GUPNP_NETWORK_MANAGER (user_data);
         error = NULL;
 
         device_proxy = g_dbus_proxy_new_for_bus_finish (res, &error);
         if (G_UNLIKELY (error != NULL)) {
-                g_message ("Failed to create D-Bus proxy: %s", error->message);
+                if (!g_error_matches (error, G_IO_ERROR, G_IO_ERROR_CANCELLED))
+                        g_message ("Failed to create D-Bus proxy: %s", error->message);
                 g_error_free (error);
 
                 goto done;
         }
 
+        manager = GUPNP_NETWORK_MANAGER (user_data);
+
         value = g_dbus_proxy_get_cached_property (device_proxy, "DeviceType");
         if (G_UNLIKELY (value == NULL)) {
-                g_object_unref (device_proxy);
-
                 goto done;
         }
 
         if (G_UNLIKELY (!g_variant_is_of_type (value, G_VARIANT_TYPE_UINT32))) {
                 g_variant_unref (value);
-                g_object_unref (device_proxy);
 
                 goto done;
         }
@@ -485,7 +487,8 @@ device_proxy_new_cb (GObject      *source_object,
                 use_new_device (manager, nm_device);
 
 done:
-        g_object_unref (manager);
+        g_clear_pointer (&nm_device, (GDestroyNotify) nm_device_unref);
+        g_clear_object (&device_proxy);
 }
 
 static int
@@ -527,7 +530,7 @@ on_manager_signal (GDBusProxy *proxy,
                                           DEVICE_INTERFACE,
                                           manager->priv->cancellable,
                                           device_proxy_new_cb,
-                                          g_object_ref (manager));
+                                          manager);
                 g_free (device_path);
         } else if (g_strcmp0 (signal_name, "DeviceRemoved") == 0) {
                 GList *device_node;
@@ -570,18 +573,19 @@ get_devices_cb (GObject      *source_object,
         char* device_path;
         GError *error = NULL;
 
-        manager = GUPNP_NETWORK_MANAGER (user_data);
-
         ret = g_dbus_proxy_call_finish (G_DBUS_PROXY (source_object),
                                         res,
                                         &error);
         if (error != NULL) {
-                g_warning ("Error fetching list of devices: %s",
-                           error->message);
+                if (!g_error_matches (error, G_IO_ERROR, G_IO_ERROR_CANCELLED))
+                        g_warning ("Error fetching list of devices: %s",
+                                   error->message);
 
                 g_error_free (error);
-                goto done;
+                return;
         }
+
+        manager = GUPNP_NETWORK_MANAGER (user_data);
 
         g_variant_get_child (ret, 0, "ao", &device_iter);
         while (g_variant_iter_loop (device_iter, "o", &device_path))
@@ -593,13 +597,10 @@ get_devices_cb (GObject      *source_object,
                                           DEVICE_INTERFACE,
                                           manager->priv->cancellable,
                                           device_proxy_new_cb,
-                                          g_object_ref (user_data));
+                                          user_data);
         g_variant_iter_free (device_iter);
 
         g_variant_unref (ret);
-
-done:
-        g_object_unref (manager);
 }
 
 static void
@@ -613,8 +614,8 @@ schedule_loopback_context_creation (GUPnPNetworkManager *manager)
                          g_main_context_get_thread_default ());
         g_source_set_callback (manager->priv->idle_context_creation_src,
                                create_loopback_context,
-                               g_object_ref (manager),
-                               (GDestroyNotify) g_object_unref);
+                               manager,
+                               NULL);
         g_source_unref (manager->priv->idle_context_creation_src);
 }
 
@@ -657,7 +658,7 @@ init_network_manager (GUPnPNetworkManager *manager)
                            -1,
                            priv->cancellable,
                            get_devices_cb,
-                           g_object_ref (manager));
+                           manager);
 }
 
 static void
@@ -717,6 +718,7 @@ gupnp_network_manager_dispose (GObject *object)
         g_list_free_full (priv->nm_devices, (GDestroyNotify) nm_device_unref);
 
         if (priv->cancellable != NULL)  {
+                g_cancellable_cancel (priv->cancellable);
                 g_object_unref (priv->cancellable);
                 priv->cancellable = NULL;
         }
@@ -742,7 +744,7 @@ gupnp_network_manager_class_init (GUPnPNetworkManagerClass *klass)
 }
 
 gboolean
-gupnp_network_manager_is_available ()
+gupnp_network_manager_is_available (void)
 {
         GDBusProxy *dbus_proxy;
         GVariant *ret_values;
