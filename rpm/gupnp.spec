@@ -21,7 +21,9 @@ Requires: dbus
 %description
 GUPnP is an object-oriented open source framework for creating UPnP 
 devices and control points, written in C using GObject and libsoup. 
-The GUPnP API is intended to be easy to use, efficient and flexible. 
+The GUPnP API is intended to be easy to use, efficient and flexible.
+Test for JB#40554
+Touch 1
 
 %package devel
 Summary: Development package for gupnp
