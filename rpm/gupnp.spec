@@ -24,6 +24,7 @@ devices and control points, written in C using GObject and libsoup.
 The GUPnP API is intended to be easy to use, efficient and flexible.
 Test for JB#40554
 Touch 1
+Touch 2
 
 %package devel
 Summary: Development package for gupnp
