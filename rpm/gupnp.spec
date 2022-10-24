@@ -9,9 +9,9 @@ Source0:       %{name}-%{version}.tar.xz
 Patch0:        0001-Completely-disable-doc-generation-because-we-dont-ha.patch
 BuildRequires: pkgconfig
 BuildRequires: meson
+BuildRequires: vala
 BuildRequires: pkgconfig(gssdp-1.2)
 BuildRequires: pkgconfig(gobject-introspection-1.0)
-BuildRequires: pkgconfig(libvala-0.46)
 BuildRequires: pkgconfig(libsoup-2.4)
 BuildRequires: pkgconfig(libxml-2.0)
 BuildRequires: pkgconfig(uuid)
