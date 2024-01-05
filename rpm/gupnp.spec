@@ -1,18 +1,18 @@
 Name:          gupnp
-Version:       1.3.0
-Release:       1%{?dist}
+Version:       1.6.6
+Release:       1
 Summary:       A framework for creating UPnP devices & control points
 
 License:       LGPLv2+
 URL:           http://www.gupnp.org/
 Source0:       %{name}-%{version}.tar.xz
-Patch0:        0001-Completely-disable-doc-generation-because-we-dont-ha.patch
+Patch0:        0001-Revert-linux-cm-Improve-address-handling.patch
 BuildRequires: pkgconfig
 BuildRequires: meson
 BuildRequires: vala
-BuildRequires: pkgconfig(gssdp-1.2)
+BuildRequires: pkgconfig(gssdp-1.6)
 BuildRequires: pkgconfig(gobject-introspection-1.0)
-BuildRequires: pkgconfig(libsoup-2.4)
+BuildRequires: pkgconfig(libsoup-3.0)
 BuildRequires: pkgconfig(libxml-2.0)
 BuildRequires: pkgconfig(uuid)
 BuildRequires: pkgconfig(connman)
